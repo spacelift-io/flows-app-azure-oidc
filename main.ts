@@ -11,7 +11,7 @@ import { ClientAssertionCredential } from "@azure/identity";
 
 // Key value store keys
 const KV_KEYS = {
-  ACCESS_TOKEN: "accessToken",
+  ACCESS_TOKENS: "accessTokens",
   EXPIRES_AT: "expiresAt",
   CONFIG_CHECKSUM: "configChecksum",
   PRIVATE_KEY: "privateKey",
@@ -28,14 +28,14 @@ export const app = defineApp({
   name: "Azure OIDC",
 
   signals: {
-    accessToken: {
-      name: "Azure Access Token",
-      description: "Azure AD access token",
+    accessTokens: {
+      name: "Azure Access Tokens",
+      description: "Map of service names to Azure AD access tokens",
       sensitive: true,
     },
     expiresAt: {
       name: "Token Expiration",
-      description: "Unix timestamp (milliseconds) when token expires",
+      description: "Unix timestamp (milliseconds) when tokens expire",
     },
   },
 
@@ -61,7 +61,7 @@ export const app = defineApp({
    - Enter the values you noted in step 2:
      - **Azure Tenant ID**: Your Directory (tenant) ID
      - **Application (Client) ID**: Your Application (client) ID
-     - **Token Scopes**: Optional, defaults to \`["https://graph.microsoft.com/.default"]\` (uses all granted permissions)
+     - **Services**: Optional, defaults to \`["management"]\` (list of Azure services to get tokens for)
      - **Token Audience**: Optional, defaults to \`api://AzureADTokenExchange\` (must match federated credential audience)
      - **Azure Setup Complete**: **Leave as false** - you'll set this to true after completing Azure federated credential setup
    - Click **"Save"**
@@ -100,9 +100,10 @@ export const app = defineApp({
    - Tokens will automatically refresh before expiration
 
 ## Usage
-- The app exposes an \`accessToken\` signal containing a valid Azure AD access token
-- Use this token in HTTP requests to Microsoft Graph or other Azure APIs
-- Token includes all permissions granted to your app registration
+- The app exposes an \`accessTokens\` signal containing a map of service names to Azure AD access tokens
+- Use tokens in HTTP requests to the corresponding Azure APIs (e.g., \`ref("signal.$installationName.accessTokens").management\` for ARM APIs)
+- Available services: management, graph, storage, keyvault, etc.
+- Tokens include all permissions granted to your app registration for each service
 - Tokens are automatically refreshed before expiration`,
 
   config: {
@@ -118,6 +119,14 @@ export const app = defineApp({
       type: "string",
       required: true,
     },
+    services: {
+      name: "Services",
+      description:
+        "Array of Azure services to get tokens for (e.g., ['management', 'graph', 'storage'])",
+      type: ["string"],
+      default: ["management"],
+      required: true,
+    },
     azureSetupComplete: {
       name: "Azure Setup Complete",
       description:
@@ -125,13 +134,6 @@ export const app = defineApp({
       type: "boolean",
       required: true,
       default: false,
-    },
-    scopes: {
-      name: "Token Scopes",
-      description:
-        "Array of scopes to request (e.g., ['https://graph.microsoft.com/.default'])",
-      type: ["string"],
-      required: false,
     },
     audience: {
       name: "Token Audience",
@@ -166,14 +168,14 @@ export const app = defineApp({
         return { newStatus: "ready" };
       }
 
-      // Generate new token
-      const newToken = await generateAccessToken(config, input.app.http.url);
+      // Generate new tokens
+      const newTokens = await generateAccessTokens(config, input.app.http.url);
 
       return {
         newStatus: "ready",
         signalUpdates: {
-          accessToken: newToken.accessToken,
-          expiresAt: newToken.expiresAt,
+          accessTokens: newTokens.accessTokens,
+          expiresAt: newTokens.expiresAt,
         },
       };
     } catch (error) {
@@ -319,7 +321,7 @@ async function shouldRefreshToken(config: any): Promise<boolean> {
   return configChanged || needsRefresh;
 }
 
-async function generateAccessToken(config: any, appUrl: string) {
+async function generateAccessTokens(config: any, appUrl: string) {
   try {
     // Use federated identity with client assertion (OIDC token)
     const credential = new ClientAssertionCredential(
@@ -331,31 +333,44 @@ async function generateAccessToken(config: any, appUrl: string) {
       },
     );
 
-    // Get access token
-    const scopes = config.scopes || ["https://graph.microsoft.com/.default"];
-    const tokenResponse = await credential.getToken(scopes);
+    // Get services list, default to ["management"]
+    const services = config.services || ["management"];
+    const accessTokens: Record<string, string> = {};
+    let earliestExpiry = Number.MAX_SAFE_INTEGER;
 
-    if (!tokenResponse) {
-      throw new Error("Failed to obtain access token from Azure");
+    // Generate token for each service
+    for (const service of services) {
+      const scope = `https://${service}.azure.com/.default`;
+      const tokenResponse = await credential.getToken(scope);
+
+      if (!tokenResponse) {
+        throw new Error(
+          `Failed to obtain access token for ${service} from Azure`,
+        );
+      }
+
+      accessTokens[service] = tokenResponse.token;
+      earliestExpiry = Math.min(
+        earliestExpiry,
+        tokenResponse.expiresOnTimestamp,
+      );
     }
 
-    const expiresAt = tokenResponse.expiresOnTimestamp;
-
-    // Store token and config checksum
+    // Store tokens and config checksum
     const configChecksum = await generateChecksum(config);
     await kv.app.setMany([
-      { key: KV_KEYS.ACCESS_TOKEN, value: tokenResponse.token },
-      { key: KV_KEYS.EXPIRES_AT, value: expiresAt },
+      { key: KV_KEYS.ACCESS_TOKENS, value: accessTokens },
+      { key: KV_KEYS.EXPIRES_AT, value: earliestExpiry },
       { key: KV_KEYS.CONFIG_CHECKSUM, value: configChecksum },
     ]);
 
     return {
-      accessToken: tokenResponse.token,
-      expiresAt: expiresAt,
+      accessTokens: accessTokens,
+      expiresAt: earliestExpiry,
     };
   } catch (error) {
     console.error(
-      "Azure token generation failed: ",
+      "Azure tokens generation failed: ",
       error instanceof Error ? error.message : String(error),
     );
     throw error;
