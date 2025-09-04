@@ -30,20 +30,56 @@ This app enables secure integration with Microsoft Azure services by:
 
 ## Configuration
 
-| Field                       | Description                           | Required | Default                                    |
-| --------------------------- | ------------------------------------- | -------- | ------------------------------------------ |
-| **Application (Client) ID** | App registration client ID            | ✅       | -                                          |
-| **Directory (Tenant) ID**   | Your Azure AD tenant identifier       | ✅       | -                                          |
-| **Azure Setup Complete**    | Set to true after Azure setup is done | ✅       | `false`                                    |
-| **Token Scopes**            | Array of scopes to request            | ❌       | `["https://graph.microsoft.com/.default"]` |
-| **Token Audience**          | OIDC token audience claim             | ❌       | `"api://AzureADTokenExchange"`             |
+| Field                       | Description                               | Required | Default                        |
+| --------------------------- | ----------------------------------------- | -------- | ------------------------------ |
+| **Application (Client) ID** | App registration client ID                | ✅       | -                              |
+| **Directory (Tenant) ID**   | Your Azure AD tenant identifier           | ✅       | -                              |
+| **Services**                | Array of Azure services to get tokens for | ✅       | `["management"]`               |
+| **Azure Setup Complete**    | Set to true after Azure setup is done     | ✅       | `false`                        |
+| **Token Audience**          | OIDC token audience claim                 | ❌       | `"api://AzureADTokenExchange"` |
 
 ## Signals
 
-| Signal        | Type                 | Description                         |
-| ------------- | -------------------- | ----------------------------------- |
-| `accessToken` | `string` (sensitive) | Azure AD access token for API calls |
-| `expiresAt`   | `number`             | Unix timestamp when token expires   |
+| Signal         | Type                 | Description                           |
+| -------------- | -------------------- | ------------------------------------- |
+| `accessTokens` | `object` (sensitive) | Map of service names to access tokens |
+| `expiresAt`    | `number`             | Unix timestamp when tokens expire     |
+
+## Blocks
+
+### HTTP Request
+
+Make arbitrary HTTP requests to Azure APIs using the managed access tokens.
+
+**Inputs:**
+
+- `url` - Complete URL to make the request to
+- `method` - HTTP method (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS)
+- `serviceName` - Azure service token to use (e.g., 'management', 'graph', 'storage')
+- `body` - Request body content (for POST/PUT/PATCH methods)
+- `bodyType` - Content type: json, text, or binary (base64-encoded)
+- `headers` - Additional HTTP headers as object
+
+**Outputs:**
+
+- `statusCode` - HTTP response status code
+- `statusText` - HTTP response status message
+- `headers` - Response headers object
+- `body` - Response body as string
+- `url` - Final URL after redirects
+- `ok` - Boolean indicating success (200-299 range)
+
+### Using Access Tokens in Other Blocks
+
+Access tokens are also available as signals for use in other flows:
+
+```javascript
+// Reference management token
+ref("signal.azureOidc.accessTokens").management;
+
+// Reference graph token
+ref("signal.azureOidc.accessTokens").graph;
+```
 
 ## Setup Guide
 
@@ -57,15 +93,16 @@ Complete setup instructions are provided within the app's installation guide. Th
 6. **Complete Setup** - Set "Azure Setup Complete" to true
 7. **Verify Setup** - Confirm token generation and refresh
 
-### Common Scopes
+### Common Services
 
-| Scope                                                | Description                 |
-| ---------------------------------------------------- | --------------------------- |
-| `["https://graph.microsoft.com/.default"]`           | Use all granted permissions |
-| `["https://graph.microsoft.com/User.Read"]`          | Read user profile           |
-| `["https://graph.microsoft.com/User.Read.All"]`      | Read all user profiles      |
-| `["https://graph.microsoft.com/Group.Read.All"]`     | Read all groups             |
-| `["https://graph.microsoft.com/Directory.Read.All"]` | Read directory data         |
+Configure the `Services` array to request tokens for different Azure services:
+
+| Service      | Description                 | Token Scope                     |
+| ------------ | --------------------------- | ------------------------------- |
+| `management` | Azure Resource Manager APIs | `https://management.azure.com/` |
+| `graph`      | Microsoft Graph API         | `https://graph.microsoft.com/`  |
+| `storage`    | Azure Storage APIs          | `https://storage.azure.com/`    |
+| `keyvault`   | Azure Key Vault APIs        | `https://vault.azure.net/`      |
 
 ## Architecture
 

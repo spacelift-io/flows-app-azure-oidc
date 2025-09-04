@@ -8,6 +8,7 @@ import {
   AppOnHTTPRequestInput,
 } from "@slflows/sdk/v1";
 import { ClientAssertionCredential } from "@azure/identity";
+import { blocks } from "./blocks";
 
 // Key value store keys
 const KV_KEYS = {
@@ -104,7 +105,13 @@ export const app = defineApp({
 - Use tokens in HTTP requests to the corresponding Azure APIs (e.g., \`ref("signal.$installationName.accessTokens").management\` for ARM APIs)
 - Available services: management, graph, storage, keyvault, etc.
 - Tokens include all permissions granted to your app registration for each service
-- Tokens are automatically refreshed before expiration`,
+- Tokens are automatically refreshed before expiration
+
+### HTTP Request Block
+- Use the built-in **HTTP Request** block to make arbitrary API calls to any Azure service
+- Simply provide the URL, HTTP method, and select the appropriate service name for token authentication
+- Supports request bodies (JSON, text, binary) and custom headers for complex API interactions
+- Perfect for calling Azure APIs not covered by specific wrapper apps`,
 
   config: {
     clientId: {
@@ -253,7 +260,7 @@ export const app = defineApp({
     },
   },
 
-  blocks: {},
+  blocks,
 });
 
 // Helper Functions
